@@ -1,26 +1,212 @@
 <!DOCTYPE html>
 <html lang="it">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Meteo Italia</title>
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="css/style.css" />
+  <style>
+    :root {
+      --bg-color: #e3f2fd;
+      --text-color: #000;
+      --card-bg: white;
+      --card-shadow: rgba(0, 0, 0, 0.15);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg-color: #121212;
+        --text-color: #fff;
+        --card-bg: #1e1e1e;
+        --card-shadow: rgba(255, 255, 255, 0.15);
+      }
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: var(--bg-color);
+      color: var(--text-color);
+      text-align: center;
+      padding: 2rem;
+      transition: background 0.3s, color 0.3s;
+    }
+
+    h1 { color: var(--text-color); }
+    input, button {
+      padding: 0.5rem;
+      font-size: 1rem;
+      margin: 0.5rem;
+    }
+    #weather {
+      margin-top: 1.5rem;
+    }
+    .card {
+      background: var(--card-bg);
+      border-radius: 10px;
+      display: inline-block;
+      padding: 1rem;
+      margin: 1rem;
+      box-shadow: 0 2px 8px var(--card-shadow);
+      width: 200px;
+    }
+    .card img {
+      width: 60px;
+      height: 60px;
+    }
+    #alerts {
+      margin-top: 1rem;
+      padding: 1rem;
+      background: #ffcccb;
+      color: #900;
+      border-radius: 8px;
+      display: none;
+    }
+  </style>
 </head>
 <body>
   <h1>Previsioni Meteo Italia 🇮🇹</h1>
-  <input type="text" id="city" placeholder="Inserisci città" />
-  <button onclick="getWeatherFromInput()">Cerca</button>
+  <input type="text" id="city" placeholder="Inserisci città">
+  <button onclick="onSearch()">Cerca</button>
   <button onclick="getLocationWeather()">🌍 Usa la mia posizione</button>
+
   <div id="weather"></div>
+  <div id="alerts"></div>
 
-  <h2>Ultime scosse di terremoto in Italia 🇮🇹</h2>
-  <label for="minMag">Magnitudo minima: </label>
-  <input type="number" id="minMag" value="2.5" step="0.1" onchange="getEarthquakes()" />
-  <div id="quakes">Caricamento dati terremoti...</div>
-  <div id="map" style="height: 400px; margin-top: 1rem;"></div>
+  <script>
+    const apiKey = '42cdeff424a381ee479b0fd56eacf694';
 
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="js/app.js"></script>
+    if ('Notification' in window) {
+      Notification.requestPermission().then(permission => {
+        console.log('Notifiche:', permission);
+      });
+    }
+
+    function onSearch() {
+      const city = document.getElementById('city').value.trim();
+      if (!city) {
+        alert("Inserisci una città valida.");
+        return;
+      }
+      getWeatherByCity(city);
+    }
+
+    async function getWeatherByCity(city) {
+      const weatherDiv = document.getElementById('weather');
+      const alertsDiv = document.getElementById('alerts');
+      weatherDiv.innerHTML = 'Caricamento...';
+      alertsDiv.style.display = 'none';
+      alertsDiv.innerHTML = '';
+
+      try {
+        const currentRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${city},IT&appid=${apiKey}&units=metric&lang=it`);
+        const currentData = await currentRes.json();
+
+        if (currentData.cod !== 200) {
+          throw new Error("Città non trovata");
+        }
+
+        const { lat, lon } = currentData.coord;
+        getWeather(null, lat, lon, currentData.name);
+      } catch (error) {
+        weatherDiv.innerHTML = `<p>Errore: ${error.message}</p>`;
+      }
+    }
+
+    async function getWeather(city = null, lat = null, lon = null, resolvedCity = null) {
+      const weatherDiv = document.getElementById('weather');
+      const alertsDiv = document.getElementById('alerts');
+      weatherDiv.innerHTML = 'Caricamento...';
+      alertsDiv.style.display = 'none';
+      alertsDiv.innerHTML = '';
+
+      try {
+        const forecastRes = await fetch(`https://api.openweathermap.org/data/2.5/forecast?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=it`);
+        const forecastData = await forecastRes.json();
+
+        const oneCallRes = await fetch(`https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&appid=${apiKey}&lang=it`);
+        const oneCallData = await oneCallRes.json();
+
+        const currentRes = await fetch(`https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&appid=${apiKey}&units=metric&lang=it`);
+        const currentData = await currentRes.json();
+
+        if (forecastData.cod !== "200") {
+          throw new Error("Errore nel recupero delle previsioni");
+        }
+
+        const name = resolvedCity || currentData.name;
+        const { description, icon } = currentData.weather[0];
+        const { temp, humidity } = currentData.main;
+        const wind = currentData.wind.speed;
+        const iconUrl = `https://openweathermap.org/img/wn/${icon}@2x.png`;
+
+        const dailyForecasts = forecastData.list.filter(f => f.dt_txt.includes("12:00:00")).slice(0, 3);
+
+        weatherDiv.innerHTML = `
+          <div class="card">
+            <h2>${name}</h2>
+            <img src="${iconUrl}" alt="${description}">
+            <p><strong>${description}</strong></p>
+            <p>Temperatura: ${temp}°C</p>
+            <p>Umidità: ${humidity}%</p>
+            <p>Vento: ${wind} m/s</p>
+          </div>
+          <h3>Prossimi 3 giorni</h3>
+          <div id="forecast"></div>
+        `;
+
+        const forecastDiv = document.getElementById('forecast');
+        forecastDiv.innerHTML = dailyForecasts.map(day => {
+          const date = new Date(day.dt_txt);
+          const options = { weekday: 'long' };
+          const dayName = date.toLocaleDateString('it-IT', options);
+          const dayIcon = `https://openweathermap.org/img/wn/${day.weather[0].icon}@2x.png`;
+
+          return `
+            <div class="card">
+              <h4>${dayName}</h4>
+              <img src="${dayIcon}" alt="${day.weather[0].description}">
+              <p>${day.weather[0].description}</p>
+              <p>Temp: ${day.main.temp}°C</p>
+            </div>
+          `;
+        }).join('');
+
+        if (oneCallData.alerts && oneCallData.alerts.length > 0) {
+          alertsDiv.style.display = 'block';
+          alertsDiv.innerHTML = `<h3>⚠️ Allerta Meteo</h3>` + oneCallData.alerts.map(alert => {
+            const alertContent = `<p><strong>${alert.event}</strong><br>${alert.description}</p>`;
+
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('⚠️ Allerta Meteo', {
+                body: `${alert.event}: ${alert.description.substring(0, 100)}...`,
+                icon: 'https://openweathermap.org/img/wn/11d@2x.png'
+              });
+            }
+
+            return alertContent;
+          }).join('<hr>');
+        }
+
+      } catch (error) {
+        weatherDiv.innerHTML = `<p>Errore: ${error.message}</p>`;
+      }
+    }
+
+    function getLocationWeather() {
+      if (!navigator.geolocation) {
+        alert("La geolocalizzazione non è supportata dal tuo browser.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          const { latitude, longitude } = position.coords;
+          getWeather(null, latitude, longitude);
+        },
+        (error) => {
+          alert("Errore nella geolocalizzazione: " + error.message);
+        }
+      );
+    }
+  </script>
 </body>
 </html>
